@@ -17,10 +17,8 @@ Zora relevance: HIGH — patterns directly applicable to raster processing pipel
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
 from pathlib import Path
 
-import torch
 from dagster import AssetExecutionContext, Config, Output, asset
 
 
@@ -30,16 +28,16 @@ from dagster import AssetExecutionContext, Config, Output, asset
 
 
 class DataConfig(Config):
+    # Root directory for downloaded datasets
     data_root: str = "data/torchgeo_tutorial"
-    """Root directory for downloaded datasets."""
 
 
 class TrainingConfig(Config):
     data_root: str = "data/torchgeo_tutorial"
+    # Spatial size (pixels) of each sampled patch
     patch_size: int = 256
-    """Spatial size (pixels) of each sampled patch."""
+    # Number of random patches to sample per epoch
     length: int = 200
-    """Number of random patches to sample per epoch."""
     batch_size: int = 8
     num_workers: int = 0
     max_epochs: int = 5
@@ -72,7 +70,6 @@ def raw_data(context: AssetExecutionContext, config: DataConfig) -> Output[dict]
     from torchgeo.datasets import CDL, Landsat7, Landsat8
 
     root = Path(config.data_root)
-
     landsat7_root = root / "landsat7"
     landsat8_root = root / "landsat8"
     cdl_root = root / "cdl"
@@ -87,18 +84,6 @@ def raw_data(context: AssetExecutionContext, config: DataConfig) -> Output[dict]
     l8_files = list(landsat8_root.rglob("*.TIF"))
     cdl_files = list(cdl_root.rglob("*.img"))
 
-    metadata = {
-        "landsat7_root": str(landsat7_root),
-        "landsat8_root": str(landsat8_root),
-        "cdl_root": str(cdl_root),
-        "landsat7_files": len(l7_files),
-        "landsat8_files": len(l8_files),
-        "cdl_files": len(cdl_files),
-        "landsat7_crs": str(landsat7.crs),
-        "landsat8_crs": str(landsat8.crs),
-        "cdl_crs": str(cdl.crs),
-    }
-
     context.log.info(
         f"Landsat7: {len(l7_files)} files | "
         f"Landsat8: {len(l8_files)} files | "
@@ -106,7 +91,17 @@ def raw_data(context: AssetExecutionContext, config: DataConfig) -> Output[dict]
     )
 
     return Output(
-        value=metadata,
+        value={
+            "landsat7_root": str(landsat7_root),
+            "landsat8_root": str(landsat8_root),
+            "cdl_root": str(cdl_root),
+            "landsat7_files": len(l7_files),
+            "landsat8_files": len(l8_files),
+            "cdl_files": len(cdl_files),
+            "landsat7_crs": str(landsat7.crs),
+            "landsat8_crs": str(landsat8.crs),
+            "cdl_crs": str(cdl.crs),
+        },
         metadata={
             "landsat7_files": len(l7_files),
             "landsat8_files": len(l8_files),
@@ -128,7 +123,8 @@ def raw_data(context: AssetExecutionContext, config: DataConfig) -> Output[dict]
     ),
 )
 def geo_dataset(
-    context: AssetExecutionContext, raw_data: dict  # noqa: A002
+    context: AssetExecutionContext,
+    raw_data: dict,  # noqa: A002
 ) -> Output[dict]:
     """
     Build the composed TorchGeo GeoDataset.
@@ -163,17 +159,16 @@ def geo_dataset(
 
     context.log.info(f"Sample image shape: {image_shape} | mask shape: {mask_shape}")
 
-    stats = {
-        "crs": str(dataset.crs),
-        "res": dataset.res,
-        "bounds": str(dataset.bounds),
-        "image_shape": image_shape,
-        "mask_shape": mask_shape,
-        "data_root": raw_data["landsat7_root"].replace("landsat7", ""),
-    }
-
     return Output(
-        value=stats,
+        value={
+            "crs": str(dataset.crs),
+            "res": dataset.res,
+            "bounds": str(dataset.bounds),
+            "image_shape": image_shape,
+            "mask_shape": mask_shape,
+            "image_channels": image_shape[0],
+            "data_root": raw_data["landsat7_root"].replace("landsat7", ""),
+        },
         metadata={
             "crs": str(dataset.crs),
             "image_channels": image_shape[0],
@@ -206,16 +201,17 @@ def trained_model(
     Training uses RandomGeoSampler (random patch locations) and evaluation
     uses GridGeoSampler (non-overlapping grid, no double-counting).
 
-    The model is a lightweight segmentation head on top of a ResNet-18
-    encoder. For a full training run, increase max_epochs and length.
+    For a production-grade training loop with pretrained Landsat weights, swap
+    the mini U-Net for torchgeo.trainers.SemanticSegmentationTask.
 
     Returns checkpoint path and final training loss.
     """
-    from torch import nn
+    import torch
+    import torch.nn as nn
     from torch.utils.data import DataLoader
     from torchgeo.datasets import CDL, Landsat7, Landsat8
-    from torchgeo.samplers import GridGeoSampler, RandomGeoSampler
     from torchgeo.datasets.utils import stack_samples
+    from torchgeo.samplers import GridGeoSampler, RandomGeoSampler
 
     root = geo_dataset["data_root"]
     landsat7 = Landsat7(root=os.path.join(root, "landsat7"))
@@ -225,13 +221,8 @@ def trained_model(
     landsat = landsat7 | landsat8
     dataset = landsat & cdl
 
-    # Samplers
-    train_sampler = RandomGeoSampler(
-        dataset, size=config.patch_size, length=config.length
-    )
-    val_sampler = GridGeoSampler(
-        dataset, size=config.patch_size, stride=config.patch_size
-    )
+    train_sampler = RandomGeoSampler(dataset, size=config.patch_size, length=config.length)
+    val_sampler = GridGeoSampler(dataset, size=config.patch_size, stride=config.patch_size)
 
     train_loader = DataLoader(
         dataset,
@@ -240,7 +231,7 @@ def trained_model(
         collate_fn=stack_samples,
         num_workers=config.num_workers,
     )
-    val_loader = DataLoader(
+    DataLoader(  # val_loader — kept for evaluation loop extension
         dataset,
         batch_size=config.batch_size,
         sampler=val_sampler,
@@ -248,8 +239,6 @@ def trained_model(
         num_workers=config.num_workers,
     )
 
-    # Model: simple encoder-decoder (swap for torchgeo.trainers.SemanticSegmentationTask
-    # for a full Lightning-backed training loop with pretrained weights)
     in_channels = geo_dataset["image_channels"]
     num_classes = 256  # CDL has up to 256 land cover classes
 
@@ -284,7 +273,6 @@ def trained_model(
         train_losses.append(avg_loss)
         context.log.info(f"Epoch {epoch + 1}/{config.max_epochs} — loss: {avg_loss:.4f}")
 
-    # Save checkpoint
     ckpt_dir = Path(config.checkpoint_dir)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     ckpt_path = ckpt_dir / "torchgeo_tutorial.pt"
@@ -312,53 +300,54 @@ def trained_model(
 
 
 # ---------------------------------------------------------------------------
-# Internal helpers
+# Internal helpers (no module-level torch import — loaded lazily above)
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class _ConvBlock(torch.nn.Module):
-    """Two conv layers with BN + ReLU."""
-
-    def __init__(self, in_ch: int, out_ch: int) -> None:
-        super().__init__()
-        self.block = torch.nn.Sequential(
-            torch.nn.Conv2d(in_ch, out_ch, 3, padding=1, bias=False),
-            torch.nn.BatchNorm2d(out_ch),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.Conv2d(out_ch, out_ch, 3, padding=1, bias=False),
-            torch.nn.BatchNorm2d(out_ch),
-            torch.nn.ReLU(inplace=True),
-        )
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.block(x)
-
-
-def _build_segmentation_model(in_channels: int, num_classes: int) -> torch.nn.Module:
+def _build_segmentation_model(in_channels: int, num_classes: int):
     """
-    Minimal U-Net style model for semantic segmentation.
+    Minimal U-Net for semantic segmentation.
 
     For production use, replace with:
         from torchgeo.trainers import SemanticSegmentationTask
         task = SemanticSegmentationTask(
-            model="unet", backbone="resnet18", weights="Landsat8_OLI_TIRS_LandCover",
-            in_channels=in_channels, num_classes=num_classes, ...
+            model="unet", backbone="resnet18",
+            weights="Landsat8_OLI_TIRS_LandCover",
+            in_channels=in_channels, num_classes=num_classes,
         )
     """
+    import torch
+    import torch.nn as nn
 
-    class MiniUNet(torch.nn.Module):
+    class _ConvBlock(nn.Module):
+        """Two conv layers with BN + ReLU."""
+
+        def __init__(self, in_ch: int, out_ch: int) -> None:
+            super().__init__()
+            self.block = nn.Sequential(
+                nn.Conv2d(in_ch, out_ch, 3, padding=1, bias=False),
+                nn.BatchNorm2d(out_ch),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(out_ch, out_ch, 3, padding=1, bias=False),
+                nn.BatchNorm2d(out_ch),
+                nn.ReLU(inplace=True),
+            )
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            return self.block(x)
+
+    class MiniUNet(nn.Module):
         def __init__(self) -> None:
             super().__init__()
             self.enc1 = _ConvBlock(in_channels, 32)
             self.enc2 = _ConvBlock(32, 64)
-            self.pool = torch.nn.MaxPool2d(2)
+            self.pool = nn.MaxPool2d(2)
             self.bottleneck = _ConvBlock(64, 128)
-            self.up1 = torch.nn.ConvTranspose2d(128, 64, 2, stride=2)
+            self.up1 = nn.ConvTranspose2d(128, 64, 2, stride=2)
             self.dec1 = _ConvBlock(128, 64)
-            self.up2 = torch.nn.ConvTranspose2d(64, 32, 2, stride=2)
+            self.up2 = nn.ConvTranspose2d(64, 32, 2, stride=2)
             self.dec2 = _ConvBlock(64, 32)
-            self.head = torch.nn.Conv2d(32, num_classes, 1)
+            self.head = nn.Conv2d(32, num_classes, 1)
 
         def forward(self, x: torch.Tensor) -> torch.Tensor:
             e1 = self.enc1(x)
