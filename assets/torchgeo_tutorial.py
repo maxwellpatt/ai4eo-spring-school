@@ -14,9 +14,6 @@ Session: TorchGeo + MLOps — Adam Stewart (TU Munich).
 Zora relevance: HIGH — patterns directly applicable to raster processing pipelines.
 """
 
-from __future__ import annotations
-
-import os
 from pathlib import Path
 
 from dagster import AssetExecutionContext, Config, Output, asset
@@ -50,57 +47,70 @@ class TrainingConfig(Config):
 # ---------------------------------------------------------------------------
 
 
+_HF_BASE = (
+    "https://hf.co/datasets/torchgeo/tutorials/resolve/"
+    "ff30b729e3cbf906148d69a4441cc68023898924/"
+)
+_LANDSAT7_ARCHIVE = "LE07_L2SP_022032_20230725_20230820_02_T1.tar.gz"
+_LANDSAT8_ARCHIVE = "LC08_L2SP_023032_20230831_20230911_02_T1.tar.gz"
+_CDL_ARCHIVE = "2023_30m_cdls.zip"
+
+LANDSAT7_BANDS = ["SR_B1", "SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B7"]
+LANDSAT8_BANDS = ["SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B6", "SR_B7"]
+
+
 @asset(
     group_name="torchgeo_tutorial",
     description=(
-        "Download Landsat 7, Landsat 8, and Cropland Data Layer (CDL) tiles "
-        "to a local directory using TorchGeo's built-in download helpers."
+        "Download Landsat 7, Landsat 8, and Cropland Data Layer (CDL) sample tiles "
+        "from the TorchGeo HuggingFace tutorial repository."
     ),
 )
 def raw_data(context: AssetExecutionContext, config: DataConfig) -> Output[dict]:
     """
-    Materialise raw geospatial data to disk.
+    Download pre-packaged tutorial data from HuggingFace.
 
-    TorchGeo GeoDatasets accept a root directory and download=True to fetch
-    data automatically. This asset ensures all three sources are present before
-    the dataset composition step.
-
-    Returns metadata dict with download paths and file counts.
+    Landsat 7/8 no longer support auto-download via TorchGeo; the tutorial
+    instead ships small sample archives on HuggingFace. Both Landsat archives
+    are extracted into the same directory so Landsat7/Landsat8 can share a
+    single `paths` root. CDL is extracted separately.
     """
-    from torchgeo.datasets import CDL, Landsat7, Landsat8
+    from torchgeo.datasets.utils import download_and_extract_archive
 
     root = Path(config.data_root)
-    landsat7_root = root / "landsat7"
-    landsat8_root = root / "landsat8"
+    landsat_root = root / "landsat"
     cdl_root = root / "cdl"
+    landsat_root.mkdir(parents=True, exist_ok=True)
+    cdl_root.mkdir(parents=True, exist_ok=True)
 
-    context.log.info(f"Downloading datasets to {root}")
+    context.log.info(f"Downloading Landsat 7 archive to {landsat_root}")
+    download_and_extract_archive(_HF_BASE + _LANDSAT7_ARCHIVE, str(landsat_root))
 
-    landsat7 = Landsat7(root=str(landsat7_root), download=True)
-    landsat8 = Landsat8(root=str(landsat8_root), download=True)
-    cdl = CDL(root=str(cdl_root), download=True)
+    context.log.info(f"Downloading Landsat 8 archive to {landsat_root}")
+    download_and_extract_archive(_HF_BASE + _LANDSAT8_ARCHIVE, str(landsat_root))
 
-    l7_files = list(landsat7_root.rglob("*.TIF"))
-    l8_files = list(landsat8_root.rglob("*.TIF"))
-    cdl_files = list(cdl_root.rglob("*.img"))
+    context.log.info(f"Downloading CDL archive to {cdl_root}")
+    download_and_extract_archive(_HF_BASE + _CDL_ARCHIVE, str(cdl_root))
+
+    l7_files = list(landsat_root.rglob("LE07_*.TIF"))
+    l8_files = list(landsat_root.rglob("LC08_*.TIF"))
+    cdl_files = list(cdl_root.rglob("*.tif"))
 
     context.log.info(
-        f"Landsat7: {len(l7_files)} files | "
-        f"Landsat8: {len(l8_files)} files | "
-        f"CDL: {len(cdl_files)} files"
+        f"Landsat7: {len(l7_files)} TIF files | "
+        f"Landsat8: {len(l8_files)} TIF files | "
+        f"CDL: {len(cdl_files)} tif files"
     )
 
     return Output(
         value={
-            "landsat7_root": str(landsat7_root),
-            "landsat8_root": str(landsat8_root),
+            "landsat_root": str(landsat_root),
             "cdl_root": str(cdl_root),
+            "landsat7_bands": LANDSAT7_BANDS,
+            "landsat8_bands": LANDSAT8_BANDS,
             "landsat7_files": len(l7_files),
             "landsat8_files": len(l8_files),
             "cdl_files": len(cdl_files),
-            "landsat7_crs": str(landsat7.crs),
-            "landsat8_crs": str(landsat8.crs),
-            "cdl_crs": str(cdl.crs),
         },
         metadata={
             "landsat7_files": len(l7_files),
@@ -139,9 +149,9 @@ def geo_dataset(
     from torchgeo.datasets import CDL, Landsat7, Landsat8
     from torchgeo.samplers import RandomGeoSampler
 
-    landsat7 = Landsat7(root=raw_data["landsat7_root"])
-    landsat8 = Landsat8(root=raw_data["landsat8_root"])
-    cdl = CDL(root=raw_data["cdl_root"])
+    landsat7 = Landsat7(paths=raw_data["landsat_root"], bands=raw_data["landsat7_bands"])
+    landsat8 = Landsat8(paths=raw_data["landsat_root"], bands=raw_data["landsat8_bands"])
+    cdl = CDL(paths=raw_data["cdl_root"])
 
     # Union of Landsat sources, then intersect with labels
     landsat = landsat7 | landsat8
@@ -159,15 +169,19 @@ def geo_dataset(
 
     context.log.info(f"Sample image shape: {image_shape} | mask shape: {mask_shape}")
 
+    b = dataset.bounds
     return Output(
         value={
             "crs": str(dataset.crs),
             "res": dataset.res,
-            "bounds": str(dataset.bounds),
+            "bounds": {"minx": b.minx, "miny": b.miny, "maxx": b.maxx, "maxy": b.maxy},
             "image_shape": image_shape,
             "mask_shape": mask_shape,
             "image_channels": image_shape[0],
-            "data_root": raw_data["landsat7_root"].replace("landsat7", ""),
+            "data_root": raw_data["landsat_root"],
+            "cdl_root": raw_data["cdl_root"],
+            "landsat7_bands": raw_data["landsat7_bands"],
+            "landsat8_bands": raw_data["landsat8_bands"],
         },
         metadata={
             "crs": str(dataset.crs),
@@ -213,10 +227,9 @@ def trained_model(
     from torchgeo.datasets.utils import stack_samples
     from torchgeo.samplers import GridGeoSampler, RandomGeoSampler
 
-    root = geo_dataset["data_root"]
-    landsat7 = Landsat7(root=os.path.join(root, "landsat7"))
-    landsat8 = Landsat8(root=os.path.join(root, "landsat8"))
-    cdl = CDL(root=os.path.join(root, "cdl"))
+    landsat7 = Landsat7(paths=geo_dataset["data_root"], bands=geo_dataset["landsat7_bands"])
+    landsat8 = Landsat8(paths=geo_dataset["data_root"], bands=geo_dataset["landsat8_bands"])
+    cdl = CDL(paths=geo_dataset["cdl_root"])
 
     landsat = landsat7 | landsat8
     dataset = landsat & cdl
@@ -289,8 +302,25 @@ def trained_model(
     )
     context.log.info(f"Checkpoint saved to {ckpt_path}")
 
+    total_params = sum(p.numel() for p in model.parameters())
+
     return Output(
-        value={"checkpoint": str(ckpt_path), "final_loss": train_losses[-1]},
+        value={
+            "checkpoint": str(ckpt_path),
+            "final_loss": train_losses[-1],
+            "train_losses": train_losses,
+            "in_channels": in_channels,
+            "num_classes": num_classes,
+            "patch_size": config.patch_size,
+            "total_parameters": total_params,
+            "hyperparameters": {
+                "max_epochs": config.max_epochs,
+                "learning_rate": config.learning_rate,
+                "batch_size": config.batch_size,
+                "patch_size": config.patch_size,
+                "length": config.length,
+            },
+        },
         metadata={
             "checkpoint_path": str(ckpt_path),
             "final_train_loss": round(train_losses[-1], 4),
@@ -358,3 +388,137 @@ def _build_segmentation_model(in_channels: int, num_classes: int):
             return self.head(d2)
 
     return MiniUNet()
+
+
+# ---------------------------------------------------------------------------
+# Asset 4: model_stac_item
+# ---------------------------------------------------------------------------
+
+
+@asset(
+    group_name="torchgeo_tutorial",
+    description=(
+        "Write a STAC Item with MLM extension metadata describing the trained "
+        "segmentation model. Saved as a JSON file alongside the checkpoint."
+    ),
+)
+def model_stac_item(
+    context: AssetExecutionContext,
+    trained_model: dict,  # noqa: A002
+    geo_dataset: dict,  # noqa: A002
+) -> Output[dict]:
+    """
+    Produce a STAC Item conforming to the Machine Learning Model (MLM) extension.
+
+    Spec: https://github.com/stac-extensions/mlm
+
+    The item captures everything needed to reproduce or deploy the model:
+    architecture, framework version, input/output tensor specs, training
+    hyperparameters, spatial extent, and a link to the checkpoint artifact.
+    """
+    import datetime
+    import json
+
+    import torch
+    from pyproj import CRS, Transformer
+
+    MLM_SCHEMA = "https://stac-extensions.github.io/mlm/v1.4.0/schema.json"
+
+    # ---- spatial extent (reproject to WGS-84 for STAC bbox/geometry) --------
+    b = geo_dataset["bounds"]
+    src_crs = CRS.from_user_input(geo_dataset["crs"])
+    wgs84 = CRS.from_epsg(4326)
+    if not src_crs.equals(wgs84):
+        transformer = Transformer.from_crs(src_crs, wgs84, always_xy=True)
+        west, south = transformer.transform(b["minx"], b["miny"])
+        east, north = transformer.transform(b["maxx"], b["maxy"])
+    else:
+        west, south, east, north = b["minx"], b["miny"], b["maxx"], b["maxy"]
+
+    bbox = [west, south, east, north]
+    geometry = {
+        "type": "Polygon",
+        "coordinates": [[
+            [west, south], [east, south], [east, north], [west, north], [west, south],
+        ]],
+    }
+
+    # ---- tensor specs --------------------------------------------------------
+    patch_size = trained_model["patch_size"]
+    in_channels = trained_model["in_channels"]
+    num_classes = trained_model["num_classes"]
+
+    mlm_input = [{
+        "name": "landsat_patch",
+        "bands": geo_dataset["landsat7_bands"] + geo_dataset["landsat8_bands"],
+        "input": {
+            "shape": [-1, in_channels, patch_size, patch_size],
+            "dim_order": ["batch", "channel", "height", "width"],
+            "data_type": "float32",
+        },
+    }]
+
+    mlm_output = [{
+        "name": "land_cover_mask",
+        "tasks": ["semantic-segmentation"],
+        "result": {
+            "shape": [-1, num_classes, patch_size, patch_size],
+            "dim_order": ["batch", "class", "height", "width"],
+            "data_type": "float32",
+        },
+    }]
+
+    # ---- checkpoint artifact -------------------------------------------------
+    ckpt_path = Path(trained_model["checkpoint"])
+    ckpt_size = ckpt_path.stat().st_size if ckpt_path.exists() else None
+
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+    item = {
+        "type": "Feature",
+        "stac_version": "1.0.0",
+        "stac_extensions": [MLM_SCHEMA],
+        "id": "torchgeo-tutorial-mini-unet",
+        "geometry": geometry,
+        "bbox": bbox,
+        "properties": {
+            "datetime": now,
+            "mlm:name": "torchgeo-tutorial-mini-unet",
+            "mlm:architecture": "U-Net",
+            "mlm:tasks": ["semantic-segmentation"],
+            "mlm:framework": "PyTorch",
+            "mlm:framework_version": torch.__version__,
+            "mlm:total_parameters": trained_model["total_parameters"],
+            "mlm:pretrained": False,
+            "mlm:pretrained_source": None,
+            "mlm:input": mlm_input,
+            "mlm:output": mlm_output,
+            "mlm:hyperparameters": trained_model["hyperparameters"],
+            "mlm:batch_size_suggestion": trained_model["hyperparameters"]["batch_size"],
+        },
+        "assets": {
+            "model": {
+                "href": str(ckpt_path.resolve()),
+                "type": "application/octet-stream",
+                "title": "PyTorch checkpoint (torch.save)",
+                "roles": ["mlm:model"],
+                "mlm:artifact_type": "torch.save",
+                **({"file:size": ckpt_size} if ckpt_size else {}),
+            }
+        },
+        "links": [],
+    }
+
+    stac_path = ckpt_path.with_suffix(".stac.json")
+    stac_path.write_text(json.dumps(item, indent=2))
+    context.log.info(f"STAC item written to {stac_path}")
+
+    return Output(
+        value={"stac_path": str(stac_path), "item_id": item["id"]},
+        metadata={
+            "stac_path": str(stac_path),
+            "mlm_schema": MLM_SCHEMA,
+            "total_parameters": trained_model["total_parameters"],
+            "bbox": str(bbox),
+        },
+    )
