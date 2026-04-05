@@ -16,7 +16,7 @@ Zora relevance: HIGH — patterns directly applicable to raster processing pipel
 
 from pathlib import Path
 
-from dagster import AssetExecutionContext, Config, Output, asset
+from dagster import AssetExecutionContext, Config, MetadataValue, Output, asset
 
 
 # ---------------------------------------------------------------------------
@@ -30,7 +30,6 @@ class DataConfig(Config):
 
 
 class TrainingConfig(Config):
-    data_root: str = "data/torchgeo_tutorial"
     # Spatial size (pixels) of each sampled patch
     patch_size: int = 256
     # Number of random patches to sample per epoch
@@ -61,6 +60,7 @@ LANDSAT8_BANDS = ["SR_B2", "SR_B3", "SR_B4", "SR_B5", "SR_B6", "SR_B7"]
 
 @asset(
     group_name="torchgeo_tutorial",
+    kinds={"torchgeo"},
     description=(
         "Download Landsat 7, Landsat 8, and Cropland Data Layer (CDL) sample tiles "
         "from the TorchGeo HuggingFace tutorial repository."
@@ -113,9 +113,11 @@ def raw_data(context: AssetExecutionContext, config: DataConfig) -> Output[dict]
             "cdl_files": len(cdl_files),
         },
         metadata={
-            "landsat7_files": len(l7_files),
-            "landsat8_files": len(l8_files),
-            "cdl_files": len(cdl_files),
+            "landsat_root": MetadataValue.path(str(landsat_root)),
+            "cdl_root": MetadataValue.path(str(cdl_root)),
+            "landsat7_files": MetadataValue.int(len(l7_files)),
+            "landsat8_files": MetadataValue.int(len(l8_files)),
+            "cdl_files": MetadataValue.int(len(cdl_files)),
         },
     )
 
@@ -127,6 +129,7 @@ def raw_data(context: AssetExecutionContext, config: DataConfig) -> Output[dict]
 
 @asset(
     group_name="torchgeo_tutorial",
+    kinds={"torchgeo"},
     description=(
         "Compose Landsat 7 | Landsat 8 (union) and intersect with CDL labels. "
         "Returns dataset statistics: CRS, resolution, spatial extent, sample count."
@@ -184,10 +187,10 @@ def geo_dataset(
             "landsat8_bands": raw_data["landsat8_bands"],
         },
         metadata={
-            "crs": str(dataset.crs),
-            "image_channels": image_shape[0],
-            "patch_height": image_shape[1],
-            "patch_width": image_shape[2],
+            "crs": MetadataValue.text(str(dataset.crs)),
+            "image_channels": MetadataValue.int(image_shape[0]),
+            "patch_height": MetadataValue.int(image_shape[1]),
+            "patch_width": MetadataValue.int(image_shape[2]),
         },
     )
 
@@ -199,6 +202,7 @@ def geo_dataset(
 
 @asset(
     group_name="torchgeo_tutorial",
+    kinds={"pytorch"},
     description=(
         "Train a semantic segmentation model on the Landsat+CDL dataset using "
         "TorchGeo's RandomGeoSampler and GridGeoSampler. Saves checkpoint to disk."
@@ -244,7 +248,7 @@ def trained_model(
         collate_fn=stack_samples,
         num_workers=config.num_workers,
     )
-    DataLoader(  # val_loader — kept for evaluation loop extension
+    val_loader = DataLoader(
         dataset,
         batch_size=config.batch_size,
         sampler=val_sampler,
@@ -302,12 +306,25 @@ def trained_model(
     )
     context.log.info(f"Checkpoint saved to {ckpt_path}")
 
+    # Validation pass
+    model.eval()
+    val_loss = 0.0
+    with torch.no_grad():
+        for batch in val_loader:
+            images = batch["image"].to(device)
+            masks = batch["mask"].long().to(device)
+            logits = model(images)
+            val_loss += criterion(logits, masks.squeeze(1)).item()
+    avg_val_loss = val_loss / len(val_loader) if len(val_loader) > 0 else float("nan")
+    context.log.info(f"Val loss: {avg_val_loss:.4f}")
+
     total_params = sum(p.numel() for p in model.parameters())
 
     return Output(
         value={
             "checkpoint": str(ckpt_path),
             "final_loss": train_losses[-1],
+            "val_loss": avg_val_loss,
             "train_losses": train_losses,
             "in_channels": in_channels,
             "num_classes": num_classes,
@@ -322,9 +339,11 @@ def trained_model(
             },
         },
         metadata={
-            "checkpoint_path": str(ckpt_path),
-            "final_train_loss": round(train_losses[-1], 4),
-            "epochs": config.max_epochs,
+            "checkpoint_path": MetadataValue.path(str(ckpt_path)),
+            "final_train_loss": MetadataValue.float(round(train_losses[-1], 4)),
+            "val_loss": MetadataValue.float(round(avg_val_loss, 4)),
+            "total_parameters": MetadataValue.int(total_params),
+            "epochs": MetadataValue.int(config.max_epochs),
         },
     )
 
@@ -397,6 +416,7 @@ def _build_segmentation_model(in_channels: int, num_classes: int):
 
 @asset(
     group_name="torchgeo_tutorial",
+    kinds={"pystac"},
     description=(
         "Write a STAC Item with MLM extension metadata describing the trained "
         "segmentation model. Saved as a JSON file alongside the checkpoint."
@@ -516,9 +536,9 @@ def model_stac_item(
     return Output(
         value={"stac_path": str(stac_path), "item_id": item["id"]},
         metadata={
-            "stac_path": str(stac_path),
-            "mlm_schema": MLM_SCHEMA,
-            "total_parameters": trained_model["total_parameters"],
-            "bbox": str(bbox),
+            "stac_path": MetadataValue.path(str(stac_path)),
+            "mlm_schema": MetadataValue.url(MLM_SCHEMA),
+            "total_parameters": MetadataValue.int(trained_model["total_parameters"]),
+            "bbox": MetadataValue.text(str(bbox)),
         },
     )
