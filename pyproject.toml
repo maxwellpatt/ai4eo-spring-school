@@ -53,6 +53,9 @@ dev-dependencies = [
     "ipykernel>=6.29",
 ]
 
+[tool.dagster]
+module_name = "definitions"
+
 [tool.ruff]
 line-length = 100
 target-version = "py313"
