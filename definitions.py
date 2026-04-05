@@ -7,10 +7,11 @@ Run the UI:
 AI4EO Spring School 2026 — OBELIX / IRISA, Université Bretagne Sud, Vannes, April 8–10 2026.
 """
 
-from dagster import Definitions, load_assets_from_modules
+from dagster import Definitions, load_asset_checks_from_modules, load_assets_from_modules
 
 import assets.torchgeo_tutorial as torchgeo_tutorial_module
 
 all_assets = load_assets_from_modules([torchgeo_tutorial_module])
+all_checks = load_asset_checks_from_modules([torchgeo_tutorial_module])
 
-defs = Definitions(assets=all_assets)
+defs = Definitions(assets=all_assets, asset_checks=all_checks)

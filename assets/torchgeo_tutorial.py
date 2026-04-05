@@ -16,7 +16,15 @@ Zora relevance: HIGH — patterns directly applicable to raster processing pipel
 
 from pathlib import Path
 
-from dagster import AssetExecutionContext, Config, Output, asset
+from dagster import (
+    AssetCheckResult,
+    AssetExecutionContext,
+    Config,
+    MetadataValue,
+    Output,
+    asset,
+    asset_check,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -520,5 +528,63 @@ def model_stac_item(
             "mlm_schema": MLM_SCHEMA,
             "total_parameters": trained_model["total_parameters"],
             "bbox": str(bbox),
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Asset checks — run alongside materializations in CI and the Dagster UI
+# ---------------------------------------------------------------------------
+
+
+@asset_check(asset=raw_data, description="All three archives extracted with at least one file each.")
+def raw_data_files_present(raw_data: dict) -> AssetCheckResult:
+    counts = {
+        "landsat7_files": raw_data["landsat7_files"],
+        "landsat8_files": raw_data["landsat8_files"],
+        "cdl_files": raw_data["cdl_files"],
+    }
+    passed = all(v > 0 for v in counts.values())
+    return AssetCheckResult(
+        passed=passed,
+        metadata={k: MetadataValue.int(v) for k, v in counts.items()},
+    )
+
+
+@asset_check(asset=geo_dataset, description="Composed dataset has spatial overlap and a valid image shape.")
+def geo_dataset_valid(geo_dataset: dict) -> AssetCheckResult:
+    channels = geo_dataset["image_channels"]
+    h, w = geo_dataset["image_shape"][1], geo_dataset["image_shape"][2]
+    b = geo_dataset["bounds"]
+    has_overlap = b["maxx"] > b["minx"] and b["maxy"] > b["miny"]
+    passed = channels > 0 and h > 0 and w > 0 and has_overlap
+    return AssetCheckResult(
+        passed=passed,
+        metadata={
+            "image_channels": MetadataValue.int(channels),
+            "patch_height": MetadataValue.int(h),
+            "patch_width": MetadataValue.int(w),
+            "has_spatial_overlap": MetadataValue.bool(has_overlap),
+        },
+    )
+
+
+@asset_check(asset=trained_model, description="Checkpoint file exists, is non-empty, and training loss is finite.")
+def trained_model_checkpoint_valid(trained_model: dict) -> AssetCheckResult:
+    import math
+
+    ckpt = Path(trained_model["checkpoint"])
+    exists = ckpt.exists()
+    size = ckpt.stat().st_size if exists else 0
+    loss = trained_model["final_loss"]
+    loss_finite = math.isfinite(loss)
+    passed = exists and size > 0 and loss_finite
+    return AssetCheckResult(
+        passed=passed,
+        metadata={
+            "checkpoint_exists": MetadataValue.bool(exists),
+            "checkpoint_bytes": MetadataValue.int(size),
+            "final_loss": MetadataValue.float(round(loss, 4)),
+            "loss_finite": MetadataValue.bool(loss_finite),
         },
     )
