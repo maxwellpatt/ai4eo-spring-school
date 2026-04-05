@@ -169,12 +169,12 @@ def geo_dataset(
 
     context.log.info(f"Sample image shape: {image_shape} | mask shape: {mask_shape}")
 
-    b = dataset.bounds
+    b = dataset.bounds  # tuple[slice, slice, slice]: (x_slice, y_slice, t_slice)
     return Output(
         value={
             "crs": str(dataset.crs),
             "res": dataset.res,
-            "bounds": {"minx": b.minx, "miny": b.miny, "maxx": b.maxx, "maxy": b.maxy},
+            "bounds": {"minx": b[0].start, "miny": b[1].start, "maxx": b[0].stop, "maxy": b[1].stop},
             "image_shape": image_shape,
             "mask_shape": mask_shape,
             "image_channels": image_shape[0],
