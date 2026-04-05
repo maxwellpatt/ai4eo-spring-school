@@ -1,1 +1,38 @@
-# ai4eo-spring-school
+# AI4EO Spring School 2026
+
+**Hosted by:** OBELIX group at IRISA, Université Bretagne Sud, Vannes
+**Dates:** April 8–10, 2026
+**Format:** Free, in-person, ~3 ECTS on completion
+
+**Co-organised with:**
+- Copernicus Master in Digital Earth
+- Cluster SequoIA (PANORAMIX chair)
+- ESA Phi-lab
+
+## Schedule Overview
+
+### Day 1
+- [Deep learning for change detection in 3D point clouds](notes/day1/point_clouds.md) — Iris de Gélis (Estellus / Paris Observatory)
+- [Foundation Models for EO](notes/day1/foundation_models.md) — Stéphane May (CNES) & Pierre Adorni (IRISA)
+
+### Day 2
+- [Responsible AI in EO](notes/day2/responsible_ai.md) — Pedram Ghamisi (HZDR / Lancaster University)
+- [Introduction to Deep Learning with TorchGeo + MLOps](notes/day2/torchgeo_mlops.md) — Adam Stewart (TU Munich)
+
+### Day 3
+- [Generative models for EO](notes/day3/generative_models.md) — Nicolas Audebert (IGN / LASTIG lab)
+- [ESA Phi-lab data-driven project](notes/day3/phi_lab_project.md) — Group work
+
+## Repository Structure
+
+```
+notes/          # Per-session notes and preparation
+  day1/
+  day2/
+  day3/
+assets/         # Dagster assets for experiments
+  foundation_models.py
+  point_clouds.py
+  generative.py
+  phi_lab/
+```
