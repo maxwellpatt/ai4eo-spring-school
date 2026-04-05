@@ -2,7 +2,7 @@
 name = "ai4eo-spring-school"
 version = "0.1.0"
 description = "AI4EO Spring School 2026 — OBELIX / IRISA, Université Bretagne Sud, Vannes, April 8–10 2026"
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 dependencies = [
     # Deep learning
     "torch>=2.3",
@@ -24,9 +24,8 @@ dependencies = [
     "xarray>=2024.1",
     "zarr>=2.17",
     "dask[array]>=2024.1",
-    # Point clouds
+    # Point clouds (open3d excluded: no cp313 wheels yet)
     "laspy>=2.5",
-    "open3d>=0.18",
     # Visualisation & notebooks
     "matplotlib>=3.8",
     "ipykernel>=6.29",
@@ -56,4 +55,4 @@ dev-dependencies = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py313"
