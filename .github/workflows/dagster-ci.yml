@@ -25,7 +25,7 @@ jobs:
         run: uv sync --extra dagster
 
       - name: Validate Dagster definitions
-        run: uv run dagster definitions validate -f definitions.py
+        run: uv run dagster definitions validate
 
   # ------------------------------------------------------------------ #
   # Job 2: materialize-data — every PR                                  #
@@ -50,7 +50,7 @@ jobs:
       - name: Materialize raw_data and geo_dataset
         run: |
           uv run dagster asset materialize \
-            -f definitions.py \
+            -m definitions \
             --select "raw_data,geo_dataset"
 
   # ------------------------------------------------------------------ #
@@ -76,5 +76,5 @@ jobs:
       - name: Materialize full torchgeo_tutorial group
         run: |
           uv run dagster asset materialize \
-            -f definitions.py \
+            -m definitions \
             --select "group:torchgeo_tutorial"
