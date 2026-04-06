@@ -48,10 +48,7 @@ jobs:
         run: uv sync --extra dagster
 
       - name: Materialize raw_data and geo_dataset
-        run: |
-          uv run dagster asset materialize \
-            -m definitions \
-            --select "raw_data,geo_dataset"
+        run: uv run dagster job execute -j data_assets_job -m definitions
 
   # ------------------------------------------------------------------ #
   # Job 3: materialize-full — main branch pushes only                   #
@@ -74,7 +71,4 @@ jobs:
         run: uv sync --extra dagster
 
       - name: Materialize full torchgeo_tutorial group
-        run: |
-          uv run dagster asset materialize \
-            -m definitions \
-            --select "group:torchgeo_tutorial"
+        run: uv run dagster job execute -j full_pipeline_job -m definitions
