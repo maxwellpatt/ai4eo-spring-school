@@ -556,7 +556,7 @@ def geo_dataset_valid(geo_dataset: dict) -> AssetCheckResult:
     channels = geo_dataset["image_channels"]
     h, w = geo_dataset["image_shape"][1], geo_dataset["image_shape"][2]
     b = geo_dataset["bounds"]
-    has_overlap = b["maxx"] > b["minx"] and b["maxy"] > b["miny"]
+    has_overlap = bool(b["maxx"] > b["minx"] and b["maxy"] > b["miny"])
     passed = channels > 0 and h > 0 and w > 0 and has_overlap
     return AssetCheckResult(
         passed=passed,
