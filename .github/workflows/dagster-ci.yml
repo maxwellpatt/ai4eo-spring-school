@@ -18,7 +18,7 @@ jobs:
 
       - uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.13"
+          python-version: "3.12"
           enable-cache: true
 
       - name: Install dependencies
@@ -41,7 +41,7 @@ jobs:
 
       - uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.13"
+          python-version: "3.12"
           enable-cache: true
 
       - name: Install dependencies
@@ -51,7 +51,7 @@ jobs:
         run: |
           uv run dagster asset materialize \
             -f definitions.py \
-            --select "raw_data geo_dataset"
+            --select "raw_data,geo_dataset"
 
   # ------------------------------------------------------------------ #
   # Job 3: materialize-full — main branch pushes only                   #
@@ -67,7 +67,7 @@ jobs:
 
       - uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.13"
+          python-version: "3.12"
           enable-cache: true
 
       - name: Install dependencies
@@ -77,4 +77,4 @@ jobs:
         run: |
           uv run dagster asset materialize \
             -f definitions.py \
-            --select "torchgeo_tutorial/*"
+            --select "group:torchgeo_tutorial"
