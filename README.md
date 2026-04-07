@@ -1,8 +1,9 @@
 # AI4EO Spring School 2026
 
+Link to course home page: https://www-obelix.irisa.fr/ai4eo-spring-school-2026/
+
 **Hosted by:** OBELIX group at IRISA, Université Bretagne Sud, Vannes
 **Dates:** April 8–10, 2026
-**Format:** Free, in-person, ~3 ECTS on completion
 
 **Co-organised with:**
 - Copernicus Master in Digital Earth
@@ -26,13 +27,32 @@
 ## Repository Structure
 
 ```
-notes/          # Per-session notes and preparation
+definitions.py          # Dagster definitions entry point
+pyproject.toml          # Project dependencies (uv)
+notes/                  # Per-session notes and preparation
   day1/
+    foundation_models.md
+    point_clouds.md
   day2/
+    responsible_ai.md
+    torchgeo_mlops.md
   day3/
-assets/         # Dagster assets for experiments
+    generative_models.md
+    phi_lab_project.md
+assets/                 # Dagster assets for experiments
   foundation_models.py
   point_clouds.py
   generative.py
+  torchgeo_tutorial.py  # TorchGeo pipeline (raw_data → geo_dataset → trained_model)
   phi_lab/
+data/                   # Downloaded datasets (gitignored)
+  torchgeo_tutorial/    # Landsat 7/8 + Cropland Data Layer (CDL)
+checkpoints/            # Trained model checkpoints (gitignored)
+```
+
+## Setup
+
+```bash
+uv sync --extra dagster
+uv run --extra dagster dagster dev
 ```
