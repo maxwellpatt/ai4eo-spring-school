@@ -2,7 +2,7 @@
 name = "ai4eo-spring-school"
 version = "0.1.0"
 description = "AI4EO Spring School 2026 — OBELIX / IRISA, Université Bretagne Sud, Vannes, April 8–10 2026"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
     # Deep learning
     "torch>=2.3",
